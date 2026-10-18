@@ -957,9 +957,123 @@ chat.addEventListener('click', e => {
   tr.after(d);
 });
 
+// ---------- 카테고리별 수수료 랭킹 ('탑 <키워드>' / '<키워드> 순위' / '<키워드> 1위') ----------
+const RANK_N = 10;
+const RANK_FEE_LABEL = PB ? '현금 사은품' : '수수료';
+
+// 랭킹 트리거: 자연어 질문('통돌이 세탁기 중 어떤 제품이 수수료가 제일 높아?') 또는 '탑 <키워드>' 접두어
+const RANK_TRIGGER_RE = /(제일|가장|젤|최고)\s*(높|많|큰|쎄|세)|최고\s*(수수료|사은품|페이백)|(수수료|사은품|페이백)\s*왕/;
+// 랭킹 질문에서 빼고 남길 불용어 (조사 포함형 + 조사 제거 후 비교)
+const RANK_STOP = ['중','중에','중에서','어떤','어느','뭐','뭐가','뭐야','무엇','무엇이','제품','제품이','모델','모델이',
+  '거','게','것','건','애','놈','수수료','수수료가','사은품','사은품이','페이백','페이백이','렌탈료',
+  '제일','가장','젤','최고','높아','높은','높니','높냐','높지','높은거','높은게','많아','많은','많이','많냐','많은거','많은게',
+  '큰','큰거','큰게','쎄','센','세','줘','주는','주냐','주니','알려줘','보여줘','나와','나오는','좀','요','는거','는게','순위','1위','탑','톱','왕'];
+function isRankStop(t) {
+  if (RANK_STOP.includes(t)) return true;
+  const bare = t.replace(/(이|가|은|는|에서|의)$/, '');
+  return bare !== t && RANK_STOP.includes(bare);
+}
+
+function parseRankQuery(raw) {
+  const q = String(raw).toLowerCase().replace(/[?!.,~]/g, ' ').replace(/\s+/g, ' ').trim();
+  // 1) '탑 <키워드>' / '<키워드> 순위' 접두·접미형 (보너스 문법)
+  let m = q.match(/^(?:탑|톱)\s+(.+)$/);          // '탑 통돌이', '톱 통돌이 세탁기'
+  if (!m) m = q.match(/^(.+?)\s+(?:탑|톱)$/);     // '통돌이 탑'
+  if (!m) m = q.match(/^(.+?)\s*(?:순위|1위)$/);  // '통돌이 순위', '통돌이 1위'
+  if (m && m[1].trim()) return m[1].trim();
+  // 2) 자연어형: '제일/가장/젤/최고 + 높/많/큰' 조합이 있으면 랭킹 모드
+  if (!RANK_TRIGGER_RE.test(q)) return null;
+  const kw = q.split(/\s+/).filter(Boolean)
+    .map(t => t.replace(/에서$/, ''))             // '정수기에서' -> '정수기'
+    .filter(t => t && !isRankStop(t))
+    .join(' ');
+  return kw;                                       // ''이면 전체 데이터 대상 TOP10
+}
+
+function rankModelKey(s, ri) {
+  const H = DATA[s].headers, r = DATA[s].rows[ri], m = META[s];
+  const mc = H.findIndex(h => /모델/.test(h));
+  let key = mc >= 0 ? String(r[mc] || '').split('\n')[0].trim() : '';
+  if (!key) key = m.name.map(c => String(r[c] || '').split('\n')[0].trim()).filter(Boolean).join(' ');
+  if (!key) return s + '#' + ri;
+  return key.toLowerCase().replace(/[\s\/]+/g, '');
+}
+
+function rankRows(kw) {
+  let pool = INDEX, useToks = [];
+  if (kw) {
+    const { toks, sheets } = parseQuery(kw);
+    useToks = toks.length ? toks : kw.split(/\s+/).filter(Boolean);
+    pool = sheets ? INDEX.filter(e => sheets.includes(e.s)) : INDEX;
+  }
+  const hits = useToks.length ? pool.filter(e => useToks.every(t => tokenMatch(e, t))) : pool;
+  const items = [];
+  for (const e of hits) {
+    const m = META[e.s];
+    if (!m.fee.length) continue;
+    const r = DATA[e.s].rows[e.i];
+    let best = null;
+    for (const c of m.fee) {
+      const n = numOf(r[c]);
+      if (n != null && n > 0 && (best === null || n > best)) best = n;
+    }
+    if (best === null) continue;
+    items.push({ s: e.s, i: e.i, fee: best });
+  }
+  items.sort((a, b) => b.fee - a.fee);
+  // 같은 모델명(norm 기준)은 최고액 행만
+  const seen = new Set(), top = [];
+  for (const it of items) {
+    const key = rankModelKey(it.s, it.i);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    top.push(it);
+    if (top.length >= RANK_N) break;
+  }
+  return top;
+}
+
+function renderRanking(kw, top) {
+  let h = '『' + esc(kw) + '』 ' + RANK_FEE_LABEL + ' 높은 순 <b>TOP ' + top.length + '</b>';
+  h += '<div class="note">행을 누르면 상세정보가 펼쳐집니다. <span class="fee">빨간색=' + RANK_FEE_LABEL + '</span></div>';
+  h += '<div class="tblwrap"><table><tr><th>순위</th><th>업체</th><th>제품명/모델</th><th class="h-term">약정</th><th class="h-fee">' + RANK_FEE_LABEL + '</th></tr>';
+  top.forEach((it, idx) => {
+    const H = DATA[it.s].headers, r = DATA[it.s].rows[it.i], m = META[it.s];
+    const mc = H.findIndex(hd => /모델/.test(hd));
+    const names = m.name.filter(c => c !== mc && !m.fee.includes(c) && !m.rent.includes(c) && !m.term.includes(c))
+      .map(c => String(r[c] || '').split('\n')[0].trim())
+      .filter(v => v && v !== '-' && !/^\d+$/.test(v))
+      .filter((v, i2, a) => a.indexOf(v) === i2).slice(0, 3).join(' ');
+    const model = mc >= 0 ? String(r[mc] || '').split('\n')[0].trim() : '';
+    const prod = [names, model].filter(Boolean).filter((v, i2, a) => a.indexOf(v) === i2).join(' · ') || '-';
+    const terms = m.term.map(c => { const v = String(r[c] || '').trim(); return v && v !== '-' ? fmtTerm(H[c], v) : ''; })
+      .filter(Boolean).slice(0, 2);
+    h += '<tr class="click" data-s="' + escA(it.s) + '" data-i="' + it.i + '">'
+      + '<td class="num">' + (idx + 1) + '</td>'
+      + '<td>' + esc(it.s) + '</td>'
+      + '<td>' + esc(prod) + '</td>'
+      + '<td class="term">' + (terms.length ? terms.map(t => '<span class="badge">' + esc(t) + '</span>').join(' ') : '-') + '</td>'
+      + '<td class="num fee">' + esc(fmt(String(it.fee))) + '</td></tr>';
+  });
+  h += '</table></div>';
+  return h;
+}
+
 // ---------- answer ----------
 const PAGE = 8;
 function answer(raw) {
+  // 랭킹 모드: '~ 중 어떤 제품이 수수료가 제일 높아?' / '탑 <키워드>' 등으로 물으면 수수료 높은 순 TOP 10
+  const rkw = parseRankQuery(raw);
+  if (rkw !== null) {
+    const top = rankRows(rkw);
+    if (!top.length) {
+      addMsg('"' + esc(rkw) + '" 에 해당하는 상품을 찾지 못했어요.\n다른 키워드(예: 품목명, 모델명 일부)로 다시 검색해보세요.', 'bot');
+      return;
+    }
+    addMsg(renderRanking(rkw || '전체', top), 'bot');
+    return;
+  }
+
   // 여러 모델이 든 문의(견적 요청 등) 자동 인식: 모델코드 2개 이상이면 모델별로 차례로 답변
   const codes = [...new Set((String(raw).toUpperCase().match(/[A-Z]{2,5}\s*-\s*[A-Z0-9]{3,10}/g) || [])
     .map(c => c.replace(/\s/g, '')))];
