@@ -134,7 +134,6 @@ a.kakao:hover{filter:brightness(1.04)}
   <div class="hwrap">
     <svg class="logo" width="40" height="40" viewBox="0 0 48 48" role="img" aria-label="다니엘 렌탈"><rect x="2" y="2" width="44" height="44" rx="13" fill="#115A40"></rect><path d="M15 35 V25 A9 9 0 0 1 33 25 V35 Z" fill="#FAF8F5"></path><circle cx="28.5" cy="27.5" r="1.7" fill="#115A40"></circle></svg>
     <div><h1>다니엘 렌탈 · 현금 페이백 조회</h1><div class="sub" id="stats">데이터 로딩중…</div></div>
-    <label id="vatwrap" style="display:none;margin-left:auto;font-size:12.5px;font-weight:700;color:#115A40;white-space:nowrap;cursor:pointer;user-select:none"><input type="checkbox" id="vatex" style="accent-color:#115A40;vertical-align:-2px"> 부가세 제외</label>
   </div>
 </header>
 <div id="chat"></div>
@@ -159,9 +158,8 @@ const FEE_LABEL = PB ? '페이백' : '수수료';
 function feeLabel(h) { return PB ? String(h).replace(/수수료/g, '페이백') : h; }
 
 // ---------- 부가세 제외 표기 (내부용 전용) ----------
-// 수수료표 금액은 부가세 포함(VAT+) 입금액 — 토글을 켜면 ÷1.1 한 공급가액으로 표시
-let VAT_EX = false;
-try { VAT_EX = !PB && localStorage.getItem('vatex') === '1'; } catch (e) {}
+// 수수료표 금액은 부가세 포함(VAT+) 입금액 — 내부용은 항상 ÷1.1 한 공급가액으로 표시 (11/3 고정)
+const VAT_EX = !PB;
 function vatTag() { return VAT_EX && !PB ? ' (VAT제외)' : ''; }
 function fmtFee(v) {
   if (!VAT_EX || PB) return fmt(v);
@@ -1279,21 +1277,6 @@ function send(text) {
 }
 document.getElementById('send').onclick = () => send();
 q.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
-
-// 부가세 제외 토글 (내부용에서만 노출)
-const vatEl = document.getElementById('vatex');
-if (vatEl && !PB) {
-  document.getElementById('vatwrap').style.display = '';
-  vatEl.checked = VAT_EX;
-  vatEl.addEventListener('change', () => {
-    VAT_EX = vatEl.checked;
-    try { localStorage.setItem('vatex', VAT_EX ? '1' : '0'); } catch (e) {}
-    addMsg(VAT_EX
-      ? '지금부터 수수료를 <b>부가세 제외(공급가액 = 표 금액 ÷1.1)</b>로 표시합니다. 실제 입금액(부가세 포함)은 토글을 끄면 다시 보여요.'
-      : '수수료를 다시 <b>부가세 포함</b>(표 원본 그대로)으로 표시합니다.', 'bot');
-    if (LAST_Q) answer(LAST_Q);
-  });
-}
 
 const CHIPS = PB
   ? ['코웨이 정수기 페이백', '삼성 에어컨 페이백', 'LG TV 페이백', '안마의자 있어?', '당근으로 문의하기']
