@@ -653,7 +653,7 @@ function expandModelVariants(v) {
 function catHitKey(s, r) {
   const H = DATA[s].headers;
   for (let i = 0; i < H.length; i++) {
-    if (!/모델/.test(H[i]) || !r[i]) continue;
+    if (!/모델|제품명/.test(H[i]) || !r[i]) continue;
     const raw = String(r[i]).split('\n')[0];
     const cands = expandModelVariants(raw).concat(raw.split(/[\/+]/));
     for (const piece of cands) {
