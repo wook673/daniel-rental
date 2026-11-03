@@ -543,6 +543,8 @@ function render(reset) {
 rootSel.onchange = () => { refreshSubs(); render(true); };
 subSel.onchange = () => render(true);
 let t; q.oninput = () => { clearTimeout(t); t = setTimeout(() => render(true), 200); };
+// ?q= 딥링크(챗봇 '카탈로그에서 보기'): 검색창에 넣고 기존 검색으로 렌더
+{ const qp = new URLSearchParams(location.search).get('q'); if (qp) q.value = qp; }
 render(true);
 </script>
 </body>
