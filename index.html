@@ -249,18 +249,21 @@ const INDEX = [];
 for (const s of SHEETS) {
   const rows = DATA[s].rows;
   const hint = SHEET_SEARCH_HINT[s] || '';
+  const nameCols = META[s].name;
   for (let i = 0; i < rows.length; i++) {
-    let extra = '';
+    let extra = '', mvAll = '';
     for (const c of rows[i]) {
       const d = decodeRule(c);
       if (d) extra += ' ' + d.full;   // '청호 신규', '청호 타사보상' 등으로 검색 가능
       if (typeof c === 'string' && c.indexOf('(') >= 0) {
         const mv = expandModelVariants(c);
-        if (mv.length) extra += ' ' + mv.join(' ');   // 'WD120M(C/N)B' -> WD120MCB WD120MNB 검색 가능
+        if (mv.length) mvAll += ' ' + mv.join(' ');   // 'WD120M(C/N)B' -> WD120MCB WD120MNB 검색 가능
       }
     }
-    const t = (s + ' ' + rows[i].join(' ') + extra + hint).toLowerCase();
-    INDEX.push({ s, i, t, z: t.replace(/[\s\/]+/g, '') });   // z: 공백·슬래시 제거본 ('냉온정'↔'냉/온/정' 매칭)
+    const t = (s + ' ' + rows[i].join(' ') + extra + mvAll + hint).toLowerCase();
+    // n: 제품명·모델·분류 컬럼만 모은 텍스트 — 비고의 '정수기연결 가능' 같은 부수 언급은 제외
+    const nt = (s + ' ' + nameCols.map(c => rows[i][c]).join(' ') + mvAll + hint).toLowerCase();
+    INDEX.push({ s, i, t, z: t.replace(/[\s\/]+/g, ''), n: nt, nz: nt.replace(/[\s\/]+/g, '') });   // z: 공백·슬래시 제거본 ('냉온정'↔'냉/온/정' 매칭)
   }
 }
 
@@ -353,6 +356,11 @@ function tokenMatch(e, tk) {
   return e.t.includes(tk) || e.z.includes(tk.replace(/[\s\/]+/g, ''));
 }
 
+function nameMatch(e, tk) {
+  // 제품명·모델·분류 컬럼 한정 일치 — 비고 언급만으로는 안 잡힘
+  return e.n.includes(tk) || e.nz.includes(tk.replace(/[\s\/]+/g, ''));
+}
+
 function splitToken(tk, pool) {
   // 붙여 쓴 토큰을 데이터에 존재하는 조각으로 자동 분해 ('삼성무풍에어컨' -> '삼성'+'무풍'+'에어컨')
   if (tk.length < 2) return null;
@@ -370,7 +378,9 @@ function splitToken(tk, pool) {
 function search(toks, sheets) {
   const pool = sheets ? INDEX.filter(e => sheets.includes(e.s)) : INDEX;
   if (!toks.length) return pool.slice();
-  let hits = pool.filter(e => toks.every(t => tokenMatch(e, t)));
+  // 1순위: 제품명·모델·분류 컬럼 일치 → 없으면 비고 포함 전체 텍스트로 폴백
+  let hits = pool.filter(e => toks.every(t => nameMatch(e, t)));
+  if (!hits.length) hits = pool.filter(e => toks.every(t => tokenMatch(e, t)));
   if (!hits.length) {
     const expanded = toks.flatMap(t => splitToken(t, pool) || [t]);
     if (expanded.length > toks.length) {
@@ -1043,7 +1053,8 @@ function rankRows(kw, band) {
     useToks = toks.length ? toks : kw.split(/\s+/).filter(Boolean);
     pool = sheets ? INDEX.filter(e => sheets.includes(e.s)) : INDEX;
   }
-  let hits = useToks.length ? pool.filter(e => useToks.every(t => tokenMatch(e, t))) : pool;
+  let hits = useToks.length ? pool.filter(e => useToks.every(t => nameMatch(e, t))) : pool;
+  if (useToks.length && !hits.length) hits = pool.filter(e => useToks.every(t => tokenMatch(e, t)));
   if (band) hits = hits.filter(e => bandPass(e.s, e.i, band));
   const items = [];
   for (const e of hits) {
