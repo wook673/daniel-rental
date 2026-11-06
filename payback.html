@@ -198,8 +198,8 @@ for (const s of SHEETS) {
   const fee = [], rent = [], name = [], term = [];
   H.forEach((h, i) => {
     if (/수수료|^최종$/.test(h)) fee.push(i);
-    else if (/렌탈료|월납입금|구독료|월렌탈료|월 렌탈료|렌탈 료|할인가|약정할인가|반값|^\d{1,2}개월$/.test(h)) rent.push(i);
-    else if (/^규정$|약정|의무|계약|렌탈기간|점검주기|관리주기|방문주기|방문 주기/.test(h) && !/url|http/i.test(h)) term.push(i);
+    else if (/렌탈료|월납입금|구독료|월렌탈료|월 렌탈료|렌탈 료|할인가|약정할인가|반값|^\d{1,2}개월$/.test(h) && !/소유권/.test(h)) rent.push(i);
+    else if (/^규정$|약정|의무|계약|렌탈기간|소유권|점검주기|관리주기|방문주기|방문 주기/.test(h) && !/url|http/i.test(h)) term.push(i);
     if (/제품명|상품명|모델|품목|브랜드|제품군|상품군|구분|규정명|내용|제품분류|라인업|마케팅네임/.test(h)) name.push(i);
   });
   // 헤더 없는 컬럼이라도 값이 규정코드(S/P/J/H/N)면 약정 컬럼으로 자동 감지
@@ -660,18 +660,30 @@ function expandModelVariants(v) {
   return m[2].split('/').map(p => m[1] + p + m[3]);
 }
 
+// 접미사 폴백용 카탈로그 키 (긴 것 우선, 영문+숫자 섞인 4자 이상 모델코드만)
+const CAT_OK = c => c.length >= 4 && /[A-Z]/.test(c) && /[0-9]/.test(c);
+const CAT_KEYS = Object.keys(CATALOG).filter(CAT_OK).sort((a, b) => b.length - a.length);
+// 정확 일치 실패 시: ① 끝 H/M(경도 등) 1글자 제거 → ② 모델명의 접두사인 카탈로그 키(길이 차 ≤ 2, 가장 긴 것)
+function catFallback(k) {
+  if (k.length < 5) return null;
+  if (/[HM]$/.test(k)) { const k2 = k.slice(0, -1); if (CAT_OK(k2) && CATALOG[k2]) return k2; }
+  for (const c of CAT_KEYS) {
+    if (c.length < k.length && k.length - c.length <= 2 && k.startsWith(c) && /^[A-Z0-9_-]+$/.test(k.slice(c.length))) return c;
+  }
+  return null;
+}
 // 매칭된 카탈로그 항목과 모델 키를 함께 반환: [항목, 키] (없으면 null)
 function catHitKey(s, r) {
   const H = DATA[s].headers;
+  const keys = [];
   for (let i = 0; i < H.length; i++) {
     if (!/모델|제품명/.test(H[i]) || !r[i]) continue;
     const raw = String(r[i]).split('\n')[0];
     const cands = expandModelVariants(raw).concat(raw.split(/[\/+]/));
-    for (const piece of cands) {
-      const k = String(piece).replace(/\s+/g, '').toUpperCase();
-      if (CATALOG[k]) return [CATALOG[k], k];
-    }
+    for (const piece of cands) keys.push(String(piece).replace(/\s+/g, '').toUpperCase());
   }
+  for (const k of keys) if (CATALOG[k]) return [CATALOG[k], k];
+  for (const k of keys) { const f = catFallback(k); if (f) return [CATALOG[f], f]; }
   return null;
 }
 function catHit(s, r) { const x = catHitKey(s, r); return x ? x[0] : null; }
